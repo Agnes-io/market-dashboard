@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Market Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:    #f5f0e8;
+  --bg2:   #ede8de;
+  --card:  #faf7f2;
+  --bdr:   rgba(160,145,120,0.18);
+  --bdr2:  rgba(160,145,120,0.35);
+  --text:  #2c2416;
+  --muted: #8a7d68;
+  --muted2:#b5a890;
+  --acc:   #7c5c2e;
+  --acc2:  #a07840;
+  --grn:   #2d7a4f;
+  --red:   #b84040;
+  --amb:   #a06830;
+  --serif: 'Playfair Display', Georgia, serif;
+  --sans:  'DM Sans', sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;line-height:1.4}
+
+.header{background:var(--card);border-bottom:1px solid var(--bdr2);padding:9px 18px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.logo{font-family:var(--serif);font-size:16px;font-weight:600;color:var(--acc)}
+.logo span{font-family:var(--sans);font-size:11px;color:var(--muted);font-weight:300;margin-left:8px}
+.hright{display:flex;align-items:center;gap:12px}
+.ts{font-size:11px;color:var(--muted)}
+.rbtn{background:var(--acc);color:#faf7f2;border:none;padding:5px 11px;border-radius:5px;font-size:11px;font-weight:500;cursor:pointer;transition:opacity .2s}
+.rbtn:hover{opacity:.85}
+.rbtn.loading{opacity:.5;pointer-events:none}
+
+.ticker{background:var(--acc);padding:4px 0;overflow:hidden}
+.ticker-in{display:flex;gap:24px;animation:tick 50s linear infinite;width:max-content}
+.ticker-in:hover{animation-play-state:paused}
+@keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.ti{display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;color:#faf7f2}
+.ts2{font-weight:600;opacity:.65;font-size:10px;letter-spacing:.06em}
+.tup{color:#86e0a8}.tdn{color:#f4a0a0}
+.tdot{width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,.2);flex-shrink:0}
+
+.main{padding:12px 16px}
+
+.sec{font-size:9px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:var(--muted2);margin:12px 0 6px;display:flex;align-items:center;gap:8px}
+.sec::before{content:'';width:12px;height:1px;background:var(--muted2)}
+.sec::after{content:'';flex:1;height:1px;background:var(--bdr)}
+
+.row{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:2px}
+.card{background:var(--card);border:1px solid var(--bdr);border-radius:8px;padding:9px 11px;flex:1;min-width:0;transition:border-color .2s,box-shadow .2s}
+.card:hover{border-color:var(--bdr2);box-shadow:0 2px 10px rgba(124,92,46,.05)}
+.csym{font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--muted2);margin-bottom:2px}
+.cname{font-size:11px;color:var(--muted);margin-bottom:3px}
+.cval{font-family:var(--serif);font-size:15px;font-weight:500;color:var(--text);line-height:1;margin-bottom:3px}
+.cunit{font-size:10px;color:var(--muted2);font-family:var(--sans);font-weight:400;margin-left:2px}
+.cch{font-size:11px;font-weight:500;display:flex;align-items:center;gap:3px}
+.up{color:var(--grn)}.dn{color:var(--red)}.neu{color:var(--muted)}
+.ar{font-size:9px}
+
+.bot{display:flex;gap:7px;align-items:flex-start}
+.bot>*{flex:1;min-width:0}
+
+.tcard{background:var(--card);border:1px solid var(--bdr);border-radius:8px;overflow:hidden}
+.thead{font-size:9px;letter-spacing:.14em;font-weight:600;text-transform:uppercase;color:var(--muted);padding:7px 11px 5px;border-bottom:1px solid var(--bdr);background:var(--bg2)}
+.trow{display:flex;justify-content:space-between;align-items:center;padding:5px 11px;border-bottom:1px solid var(--bdr);font-size:12px}
+.trow:last-child{border-bottom:none}
+.trow:hover{background:var(--bg2)}
+.tk{color:var(--text)}
+.tv{font-weight:600;font-family:var(--serif)}
+.tvr{color:var(--acc)}
+.tvm{color:var(--amb)}
+.tvg{color:var(--grn)}
+.tnote{font-size:10px;color:var(--muted2)}
+
+.ccard{background:var(--card);border:1px solid var(--bdr);border-radius:8px;overflow:hidden}
+.crow{display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--bdr)}
+.crow:last-child{border-bottom:none}
+.crow:hover{background:var(--bg2)}
+.cnname{font-size:12px;font-weight:500}
+.cnsym{font-size:10px;color:var(--muted2)}
+.cnp{font-family:var(--serif);font-size:13px;font-weight:500;text-align:right}
+.cnch{font-size:11px;font-weight:500;text-align:right}
+
+.ncard{background:var(--card);border:1px solid var(--bdr);border-radius:8px;overflow:hidden}
+.nitem{display:block;text-decoration:none;color:inherit;padding:7px 11px;border-bottom:1px solid var(--bdr);transition:background .15s}
+.nitem:last-child{border-bottom:none}
+.nitem:hover{background:var(--bg2)}
+.nhead{font-size:12px;line-height:1.35;margin-bottom:3px;color:var(--text)}
+.nmeta{font-size:10px;color:var(--muted2);display:flex;gap:8px}
+.nsrc{color:var(--acc);font-weight:500}
+
+@media(max-width:700px){.bot{flex-direction:column}}
+@media(max-width:500px){.row .card{min-width:calc(50% - 4px)}}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div><span class="logo">Market Dashboard<span>· dane na żywo</span></span></div>
+  <div class="hright">
+    <span class="ts" id="ts">—</span>
+    <button class="rbtn" id="rbtn" onclick="fetchAll()">↻ Odśwież</button>
+  </div>
+</header>
+
+<div class="ticker"><div class="ticker-in" id="ticker">
+  <span class="ti"><span class="ts2">LOADING</span><span>—</span></span>
+</div></div>
+
+<main class="main">
+
+  <div class="sec">Indeksy giełdowe</div>
+  <div class="row" id="idx"></div>
+
+  <div class="sec">Surowce</div>
+  <div class="row" id="com"></div>
+
+  <div class="sec">Waluty</div>
+  <div class="row" id="fx"></div>
+
+  <div class="sec">Kryptowaluty &amp; Stopy procentowe &amp; Makro</div>
+  <div class="bot">
+
+    <div class="ccard" id="crypto">
+      <div class="crow"><div class="cnname" style="color:var(--muted)">Ładowanie...</div></div>
+    </div>
+
+    <div class="tcard" id="rates">
+      <div class="thead">Stopy procentowe</div>
+      <div class="trow"><div class="tk">Ładowanie...</div></div>
+    </div>
+
+    <div class="tcard" id="macro">
+      <div class="thead">Dane makroekonomiczne</div>
+      <div class="trow"><div class="tk">Ładowanie...</div></div>
+    </div>
+
+  </div>
+
+  <div class="sec">Wiadomości finansowe</div>
+  <div class="ncard" id="news">
+    <div class="nitem"><div class="nhead" style="color:var(--muted)">Ładowanie wiadomości...</div></div>
+  </div>
+
+</main>
+
+<script>
+const f2=(n,d=2)=>n==null?'—':Number(n).toLocaleString('pl-PL',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=n=>n==null?'—':(n>0?'+':'')+Number(n).toFixed(2)+'%';
+const cc=n=>n==null?'neu':n>0?'up':n<0?'dn':'neu';
+const ar=n=>n==null?'':n>0?'▲':n<0?'▼':'–';
+
+function card(sym,name,val,chg,unit=''){
+  const c=cc(chg);
+  return `<div class="card">
+    <div class="csym">${sym}</div>
+    <div class="cname">${name}</div>
+    <div class="cval">${val}${unit?`<span class="cunit">${unit}</span>`:''}</div>
+    <div class="cch ${c}"><span class="ar">${ar(chg)}</span><span>${pct(chg)}</span></div>
+  </div>`;
+}
+
+async function getFX(){const r=await fetch('https://open.er-api.com/v6/latest/USD');return(await r.json()).rates}
+async function getCrypto(){const r=await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true');return r.json()}
+async function getMetals(){const r=await fetch('https://api.metals.live/v1/spot/gold,silver,platinum,copper');const d=await r.json();const o={};if(Array.isArray(d))d.forEach(i=>Object.assign(o,i));return o}
+async function getIdx(sym){
+  const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=2d`,{headers:{'User-Agent':'Mozilla/5.0'}});
+  const d=await r.json();const m=d.chart?.result?.[0]?.meta;if(!m)return null;
+  const price=m.regularMarketPrice,prev=m.chartPreviousClose||m.previousClose;
+  return{price,chg:prev?((price-prev)/prev*100):null};
+}
+async function getNews(){
+  const r=await fetch('https://api.rss2json.com/v1/api.json?rss_url=https://feeds.finance.yahoo.com/rss/2.0/headline');
+  const d=await r.json();
+  return(d.items||[]).slice(0,7).map(i=>({title:i.title,link:i.link,date:i.pubDate?new Date(i.pubDate).toLocaleString('pl-PL',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'' }));
+}
+
+const RATES=[
+  {k:'Fed Funds Rate (USA)',v:'4.25–4.50%'},
+  {k:'EBC Deposit Rate',v:'2.50%'},
+  {k:'NBP Stopa ref. (PL)',v:'5.75%'},
+  {k:'Bank of England',v:'4.50%'},
+  {k:'UST 10Y Yield',v:'4.42%'},
+  {k:'Bund 10Y Yield (DE)',v:'2.58%'},
+  {k:'Polish 10Y Yield',v:'5.71%'},
+];
+const MACRO=[
+  {k:'Inflacja CPI PL',v:'4.9%',n:'GUS, mar 2025'},
+  {k:'Inflacja CPI USA',v:'2.4%',n:'BLS, mar 2025'},
+  {k:'Inflacja CPI UE',v:'2.2%',n:'Eurostat, lut 2025'},
+  {k:'PKB PL (r/r)',v:'+3.2%',n:'GUS, Q4 2024'},
+  {k:'PKB USA (r/r)',v:'+2.4%',n:'BEA, Q4 2024'},
+  {k:'Bezrobocie PL',v:'5.2%',n:'GUS, lut 2025'},
+];
+
+async function fetchAll(){
+  const btn=document.getElementById('rbtn');
+  btn.classList.add('loading');btn.textContent='↻ Ładowanie...';
+
+  const [fxR,crR,mtR,spR,nqR,dxR,wgR,oilR,newsR]=await Promise.allSettled([
+    getFX(),getCrypto(),getMetals(),
+    getIdx('%5EGSPC'),getIdx('%5EIXIC'),getIdx('%5EGDAXI'),getIdx('WIG20.WA'),
+    getIdx('CL%3DF'),getNews()
+  ]);
+
+  const fx=fxR.value,cr=crR.value,mt=mtR.value;
+  const sp=spR.value,nq=nqR.value,dx=dxR.value,wg=wgR.value;
+  const oil=oilR.value,news=newsR.value||[];
+
+  document.getElementById('idx').innerHTML=[
+    card('SPX','S&P 500',sp?f2(sp.price,0):'—',sp?.chg),
+    card('NDX','NASDAQ',nq?f2(nq.price,0):'—',nq?.chg),
+    card('DAX','DAX Frankfurt',dx?f2(dx.price,0):'—',dx?.chg),
+    card('WIG','WIG20 Warszawa',wg?f2(wg.price,0):'—',wg?.chg),
+  ].join('');
+
+  document.getElementById('com').innerHTML=[
+    card('XAU','Złoto',mt?.gold?f2(mt.gold):'—',null,'USD/oz'),
+    card('XAG','Srebro',mt?.silver?f2(mt.silver):'—',null,'USD/oz'),
+    card('HG','Miedź',mt?.copper?f2(mt.copper):'—',null,'USD/lb'),
+    card('CL','Ropa Brent',oil?f2(oil.price):'—',oil?.chg,'USD'),
+  ].join('');
+
+  const eurusd=fx?(1/fx.EUR).toFixed(4):null;
+  const usdpln=fx?fx.PLN.toFixed(4):null;
+  const gbpusd=fx?(1/fx.GBP).toFixed(4):null;
+  const eurpln=fx?(fx.PLN/fx.EUR).toFixed(4):null;
+  document.getElementById('fx').innerHTML=[
+    card('EUR/USD','Euro / Dolar',eurusd||'—',null),
+    card('USD/PLN','Dolar / Złoty',usdpln||'—',null),
+    card('GBP/USD','Funt / Dolar',gbpusd||'—',null),
+    card('EUR/PLN','Euro / Złoty',eurpln||'—',null),
+  ].join('');
+
+  document.getElementById('crypto').innerHTML=[
+    {id:'bitcoin',sym:'BTC',name:'Bitcoin'},
+    {id:'ethereum',sym:'ETH',name:'Ethereum'},
+    {id:'solana',sym:'SOL',name:'Solana'},
+    {id:'ripple',sym:'XRP',name:'XRP'},
+  ].map(c=>{
+    const d=cr?.[c.id],p=d?.usd,ch=d?.usd_24h_change,cl=cc(ch);
+    return `<div class="crow">
+      <div><div class="cnname">${c.name}</div><div class="cnsym">${c.sym}</div></div>
+      <div><div class="cnp">${p?'$'+f2(p,p>100?0:2):'—'}</div><div class="cnch ${cl}">${ch!=null?pct(ch):'—'}</div></div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('rates').innerHTML=
+    `<div class="thead">Stopy procentowe</div>`+
+    RATES.map(r=>`<div class="trow"><span class="tk">${r.k}</span><span class="tv tvr">${r.v}</span></div>`).join('');
+
+  document.getElementById('macro').innerHTML=
+    `<div class="thead">Dane makroekonomiczne</div>`+
+    MACRO.map(r=>`<div class="trow">
+      <div><div class="tk">${r.k}</div><div class="tnote">${r.n}</div></div>
+      <span class="tv tvm">${r.v}</span>
+    </div>`).join('');
+
+  document.getElementById('news').innerHTML=news.length
+    ?news.map(n=>`<a class="nitem" href="${n.link}" target="_blank" rel="noopener">
+        <div class="nhead">${n.title}</div>
+        <div class="nmeta"><span class="nsrc">Yahoo Finance</span><span>${n.date}</span></div>
+      </a>`).join('')
+    :`<div class="nitem"><div class="nhead" style="color:var(--muted)">Brak wiadomości — sprawdź połączenie internetowe.</div></div>`;
+
+  const ti=[
+    {s:'SP500',v:sp?f2(sp.price,0):'—',c:sp?.chg},
+    {s:'NASDAQ',v:nq?f2(nq.price,0):'—',c:nq?.chg},
+    {s:'DAX',v:dx?f2(dx.price,0):'—',c:dx?.chg},
+    {s:'WIG20',v:wg?f2(wg.price,0):'—',c:wg?.chg},
+    {s:'GOLD',v:mt?.gold?'$'+f2(mt.gold):'—',c:null},
+    {s:'SILVER',v:mt?.silver?'$'+f2(mt.silver):'—',c:null},
+    {s:'OIL',v:oil?'$'+f2(oil.price):'—',c:oil?.chg},
+    {s:'EUR/USD',v:eurusd||'—',c:null},
+    {s:'USD/PLN',v:usdpln||'—',c:null},
+    {s:'BTC',v:cr?.bitcoin?.usd?'$'+f2(cr.bitcoin.usd,0):'—',c:cr?.bitcoin?.usd_24h_change},
+    {s:'ETH',v:cr?.ethereum?.usd?'$'+f2(cr.ethereum.usd,0):'—',c:cr?.ethereum?.usd_24h_change},
+  ];
+  const th=ti.map(t=>{
+    const cl=cc(t.c);
+    return `<span class="ti"><span class="ts2">${t.s}</span><span>${t.v}</span>${t.c!=null?`<span class="${cl==='up'?'tup':'tdn'}">${pct(t.c)}</span>`:''}</span><span class="tdot"></span>`;
+  }).join('');
+  document.getElementById('ticker').innerHTML=th+th;
+
+  document.getElementById('ts').textContent='Aktualizacja: '+new Date().toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'});
+  btn.classList.remove('loading');btn.textContent='↻ Odśwież';
+}
+
+fetchAll();
+setInterval(fetchAll,5*60*1000);
+</script>
+</body>
+</html>
