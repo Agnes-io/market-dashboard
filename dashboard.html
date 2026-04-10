@@ -220,45 +220,52 @@ async function getCrypto(){
   return r.json();
 }
 
-// Stooq current price CSV: Symbol,Date,Time,Open,High,Low,Close,Volume
-async function getIdx(sym){
-  function parse(txt){
-    const lines=txt.trim().split('\n');
-    if(lines.length<2) return null;
-    const cols=lines[1].split(',');
-    const close=parseFloat(cols[6]);
-    const open=parseFloat(cols[3]);
-    if(!close||close<=0||isNaN(close)) return null;
-    const chg=(open&&!isNaN(open))?((close-open)/open*100):null;
-    return{price:close,chg};
-  }
-  const base=`https://stooq.com/q/l/?s=${encodeURIComponent(sym)}&f=sd2t2ohlcv&h&e=csv`;
-  for(const url of [base,`https://corsproxy.io/?${encodeURIComponent(base)}`]){
+// Fetch text via CORS proxies, returning first successful response
+async function proxyFetch(url){
+  const proxies=[
+    url,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  ];
+  for(const u of proxies){
     try{
-      const r=await fetch(url);
+      const ctrl=new AbortController();
+      const t=setTimeout(()=>ctrl.abort(),12000);
+      const r=await fetch(u,{signal:ctrl.signal});
+      clearTimeout(t);
       if(!r.ok) continue;
-      const result=parse(await r.text());
-      if(result) return result;
+      const txt=await r.text();
+      if(txt.trim().startsWith('<')&&!u.includes('allorigins')&&!u.includes('corsproxy')) continue; // HTML error page
+      if(txt.trim().length<10) continue;
+      return txt;
     }catch(e){continue;}
   }
   return null;
 }
 
+// Stooq current price CSV: Symbol,Date,Time,Open,High,Low,Close,Volume
+async function getIdx(sym){
+  const txt=await proxyFetch(`https://stooq.com/q/l/?s=${encodeURIComponent(sym)}&f=sd2t2ohlcv&h&e=csv`);
+  if(!txt) return null;
+  const lines=txt.trim().split('\n');
+  if(lines.length<2) return null;
+  const cols=lines[1].split(',');
+  const close=parseFloat(cols[6]);
+  const open=parseFloat(cols[3]);
+  if(!close||close<=0||isNaN(close)) return null;
+  const chg=(open&&!isNaN(open))?((close-open)/open*100):null;
+  return{price:close,chg};
+}
+
 // Stooq historical CSV: Date,Open,High,Low,Close,Volume
 async function getHistory(sym,days=30){
-  const to=new Date(), from=new Date(+to-days*86400000);
+  const to=new Date(),from=new Date(+to-days*86400000);
   const fmt=d=>d.toISOString().slice(0,10).replace(/-/g,'');
-  const base=`https://stooq.com/q/d/l/?s=${encodeURIComponent(sym)}&d1=${fmt(from)}&d2=${fmt(to)}&i=d`;
-  for(const url of [base,`https://corsproxy.io/?${encodeURIComponent(base)}`]){
-    try{
-      const r=await fetch(url);
-      if(!r.ok) continue;
-      const lines=(await r.text()).trim().split('\n').slice(1);
-      const data=lines.map(l=>{const c=l.split(',');const p=parseFloat(c[4]);return(!isNaN(p)&&p>0)?{d:c[0],p}:null;}).filter(Boolean);
-      if(data.length>2) return data;
-    }catch(e){continue;}
-  }
-  return[];
+  const txt=await proxyFetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(sym)}&d1=${fmt(from)}&d2=${fmt(to)}&i=d`);
+  if(!txt) return[];
+  const lines=txt.trim().split('\n').slice(1);
+  const data=lines.map(l=>{const c=l.split(',');const p=parseFloat(c[4]);return(!isNaN(p)&&p>0)?{d:c[0],p}:null;}).filter(Boolean);
+  return data.length>2?data:[];
 }
 
 // Mini sparkline SVG (100% wide × 28px)
@@ -282,24 +289,40 @@ function loadSparklines(items){
   });
 }
 
-// News — try multiple RSS feeds via rss2json.com
+// Parse RSS XML into news items
+function parseRSS(xml,src){
+  try{
+    const doc=new DOMParser().parseFromString(xml,'text/xml');
+    if(doc.querySelector('parsererror')) return[];
+    const items=[...doc.querySelectorAll('item')].slice(0,7);
+    return items.map(it=>{
+      const title=(it.querySelector('title')?.textContent||'').replace(/<!\[CDATA\[|\]\]>/g,'').trim();
+      const link=(it.querySelector('link')?.textContent||it.querySelector('link')?.getAttribute('href')||'').trim();
+      const pd=it.querySelector('pubDate')?.textContent||'';
+      const date=pd?new Date(pd).toLocaleString('pl-PL',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+      return title?{title,link,src,date}:null;
+    }).filter(Boolean);
+  }catch(e){return[];}
+}
+
+// News — fetch RSS directly via allorigins (no rate limit, no key needed)
 async function getNews(){
   const feeds=[
     {url:'https://feeds.reuters.com/reuters/businessNews',src:'Reuters'},
     {url:'https://www.cnbc.com/id/10000664/device/rss/rss.html',src:'CNBC'},
+    {url:'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',src:'NY Times'},
     {url:'https://feeds.finance.yahoo.com/rss/2.0/headline',src:'Yahoo Finance'},
   ];
   for(const {url,src} of feeds){
     try{
-      const r=await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(url)}&count=7`);
+      const ctrl=new AbortController();
+      const t=setTimeout(()=>ctrl.abort(),10000);
+      const r=await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,{signal:ctrl.signal});
+      clearTimeout(t);
       if(!r.ok) continue;
-      const d=await r.json();
-      if(d.status!=='ok') continue;
-      const items=(d.items||[]).filter(i=>i.title).slice(0,7);
-      if(items.length) return items.map(i=>({
-        title:i.title,link:i.link,src,
-        date:i.pubDate?new Date(i.pubDate).toLocaleString('pl-PL',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''
-      }));
+      const txt=await r.text();
+      const items=parseRSS(txt,src);
+      if(items.length) return items;
     }catch(e){continue;}
   }
   return[];
