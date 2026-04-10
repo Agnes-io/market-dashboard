@@ -168,20 +168,28 @@ async function getFX(){const r=await fetch('https://open.er-api.com/v6/latest/US
 async function getCrypto(){const r=await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true');return r.json()}
 async function getMetals(){const r=await fetch('https://api.metals.live/v1/spot/gold,silver,platinum,copper');const d=await r.json();const o={};if(Array.isArray(d))d.forEach(i=>Object.assign(o,i));return o}
 async function getIdx(sym){
-  try {
-    // Stooq CSV API - free, no key, no CORS issues
-    const r=await fetch(`https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcv&h&e=csv`);
-    const txt=await r.text();
+  // Format: Symbol,Date,Time,Open,High,Low,Close,Volume (cols 0-7)
+  function parseStooq(txt){
     const lines=txt.trim().split('\n');
     if(lines.length<2) return null;
     const cols=lines[1].split(',');
-    // Format: Symbol,Date,Time,Open,High,Low,Close,Volume
-    const close=parseFloat(cols[6])||parseFloat(cols[4]);
+    const close=parseFloat(cols[6]);
     const open=parseFloat(cols[3]);
-    if(!close||close<=0) return null;
-    const chg=open?((close-open)/open*100):null;
+    if(!close||close<=0||isNaN(close)) return null;
+    const chg=(open&&!isNaN(open))?((close-open)/open*100):null;
     return{price:close,chg};
-  } catch(e){ return null; }
+  }
+  const base=`https://stooq.com/q/l/?s=${encodeURIComponent(sym)}&f=sd2t2ohlcv&h&e=csv`;
+  // Try direct first, then CORS proxy fallback
+  for(const url of [base,`https://corsproxy.io/?${encodeURIComponent(base)}`]){
+    try{
+      const r=await fetch(url);
+      if(!r.ok) continue;
+      const result=parseStooq(await r.text());
+      if(result) return result;
+    }catch(e){continue;}
+  }
+  return null;
 }
 async function getNews(){
   const r=await fetch('https://api.rss2json.com/v1/api.json?rss_url=https://feeds.finance.yahoo.com/rss/2.0/headline');
