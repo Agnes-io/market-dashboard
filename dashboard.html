@@ -168,10 +168,20 @@ async function getFX(){const r=await fetch('https://open.er-api.com/v6/latest/US
 async function getCrypto(){const r=await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true');return r.json()}
 async function getMetals(){const r=await fetch('https://api.metals.live/v1/spot/gold,silver,platinum,copper');const d=await r.json();const o={};if(Array.isArray(d))d.forEach(i=>Object.assign(o,i));return o}
 async function getIdx(sym){
-  const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=2d`,{headers:{'User-Agent':'Mozilla/5.0'}});
-  const d=await r.json();const m=d.chart?.result?.[0]?.meta;if(!m)return null;
-  const price=m.regularMarketPrice,prev=m.chartPreviousClose||m.previousClose;
-  return{price,chg:prev?((price-prev)/prev*100):null};
+  try {
+    // Stooq CSV API - free, no key, no CORS issues
+    const r=await fetch(`https://stooq.com/q/l/?s=${sym}&f=sd2t2ohlcv&h&e=csv`);
+    const txt=await r.text();
+    const lines=txt.trim().split('\n');
+    if(lines.length<2) return null;
+    const cols=lines[1].split(',');
+    // Format: Symbol,Date,Time,Open,High,Low,Close,Volume
+    const close=parseFloat(cols[6])||parseFloat(cols[4]);
+    const open=parseFloat(cols[3]);
+    if(!close||close<=0) return null;
+    const chg=open?((close-open)/open*100):null;
+    return{price:close,chg};
+  } catch(e){ return null; }
 }
 async function getNews(){
   const r=await fetch('https://api.rss2json.com/v1/api.json?rss_url=https://feeds.finance.yahoo.com/rss/2.0/headline');
@@ -203,8 +213,8 @@ async function fetchAll(){
 
   const [fxR,crR,mtR,spR,nqR,dxR,wgR,oilR,newsR]=await Promise.allSettled([
     getFX(),getCrypto(),getMetals(),
-    getIdx('%5EGSPC'),getIdx('%5EIXIC'),getIdx('%5EGDAXI'),getIdx('WIG20.WA'),
-    getIdx('CL%3DF'),getNews()
+    getIdx('^spx'),getIdx('^ndq'),getIdx('^dax'),getIdx('wig20.pl'),
+    getIdx('cl.f'),getNews()
   ]);
 
   const fx=fxR.value,cr=crR.value,mt=mtR.value;
