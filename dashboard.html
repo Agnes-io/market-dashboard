@@ -227,8 +227,44 @@ async function getCrypto(){
   }catch(e){return null;}
 }
 
-// Parse Yahoo Finance v8 JSON response
-function parseYF(json){
+// Yahoo Finance symbol → Stooq symbol
+const STOOQ_MAP={'^GSPC':'^spx','^IXIC':'^ndq','^GDAXI':'^dax','^WIG20':'wig20','GC=F':'xauusd','SI=F':'xagusd','HG=F':'hg.f','CL=F':'cl.f'};
+
+// Fetch with timeout
+async function tf(url,ms=8000){
+  const c=new AbortController();
+  const t=setTimeout(()=>c.abort(),ms);
+  try{const r=await fetch(url,{signal:c.signal});clearTimeout(t);return r;}
+  catch(e){clearTimeout(t);throw e;}
+}
+
+// Build allorigins proxy URL
+// IMPORTANT: sym must NOT be pre-encoded (^ stays as ^) so allorigins passes it correctly to Stooq
+const ao=url=>`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+
+// Parse Stooq historical CSV: Date,Open,High,Low,Close,Volume
+function parseStooqHist(txt){
+  if(!txt||txt.trim().startsWith('<')) return[];
+  const lines=txt.trim().split('\n').slice(1);
+  return lines.map(l=>{const c=l.split(',');const p=parseFloat(c[4]);return(p&&!isNaN(p)&&p>0)?{d:c[0],p}:null;}).filter(Boolean);
+}
+
+// Fetch Stooq historical data (daily) for N days
+// sym must be RAW (e.g. '^spx', 'wig20') — NOT encodeURIComponent'd
+async function stooqHist(sym,days){
+  const to=new Date(),from=new Date(+to-days*86400000);
+  const fmt=d=>d.toISOString().slice(0,10).replace(/-/g,'');
+  // Build URL with raw sym (^ stays literal) — encodeURIComponent happens inside ao()
+  const url=`https://stooq.com/q/d/l/?s=${sym}&d1=${fmt(from)}&d2=${fmt(to)}&i=d`;
+  try{
+    const r=await tf(ao(url),9000);
+    if(!r.ok) return[];
+    return parseStooqHist(await r.text());
+  }catch(e){return[];}
+}
+
+// Parse Yahoo Finance v8 JSON
+function parseYFJSON(json){
   const res=json.chart?.result?.[0];
   if(!res) return null;
   const meta=res.meta;
@@ -242,55 +278,49 @@ function parseYF(json){
   return{price,chg,history};
 }
 
-// Fetch with timeout helper
-async function tf(url,ms=8000){
-  const c=new AbortController();
-  const t=setTimeout(()=>c.abort(),ms);
-  try{const r=await fetch(url,{signal:c.signal});clearTimeout(t);return r;}
-  catch(e){clearTimeout(t);throw e;}
+// Get price + 30-day sparkline: try Yahoo Finance, fallback Stooq
+async function getYF(yfSym){
+  // 1. Try Yahoo Finance via allorigins
+  try{
+    const yfUrl=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSym)}?interval=1d&range=1mo&includePrePost=false`;
+    const r=await tf(ao(yfUrl),8000);
+    if(r.ok){
+      const result=parseYFJSON(await r.json());
+      if(result&&result.price>0) return result;
+    }
+  }catch(e){}
+  // 2. Fallback: Stooq historical (last row = current price, array = sparkline)
+  const ssym=STOOQ_MAP[yfSym];
+  if(!ssym) return null;
+  const data=await stooqHist(ssym,35);
+  if(!data.length) return null;
+  const latest=data[data.length-1];
+  const prev=data.length>1?data[data.length-2]:null;
+  const chg=prev?((latest.p-prev.p)/prev.p*100):null;
+  return{price:latest.p,chg,history:data};
 }
 
-// Yahoo Finance v8 — price + 30-day sparkline history
-// allorigins proxy is PRIMARY (avoids Yahoo CORS issues)
-async function getYF(symbol){
-  const yfUrl=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo&includePrePost=false`;
-  const urls=[
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(yfUrl)}`,
-    yfUrl,
-  ];
-  for(const url of urls){
-    try{
-      const r=await tf(url,8000);
-      if(!r.ok) continue;
-      const json=await r.json();
-      const result=parseYF(json);
-      if(result) return result;
-    }catch(e){continue;}
-  }
-  return null;
-}
-
-// Yahoo Finance v8 — historical data for modal chart
-async function getChartData(symbol,range,interval){
-  const yfUrl=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
-  const urls=[
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(yfUrl)}`,
-    yfUrl,
-  ];
-  for(const url of urls){
-    try{
-      const r=await tf(url,10000);
-      if(!r.ok) continue;
+// Historical data for modal chart: try Yahoo Finance, fallback Stooq
+async function getChartData(yfSym,range,interval){
+  // 1. Yahoo Finance
+  try{
+    const yfUrl=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSym)}?interval=${interval}&range=${range}&includePrePost=false`;
+    const r=await tf(ao(yfUrl),9000);
+    if(r.ok){
       const json=await r.json();
       const res=json.chart?.result?.[0];
-      if(!res) continue;
-      const ts=res.timestamp||[];
-      const cl=res.indicators?.quote?.[0]?.close||[];
-      const data=ts.map((s,i)=>{const p=cl[i];return(p&&!isNaN(p)&&p>0)?{d:new Date(s*1000).toISOString().slice(0,10),p}:null;}).filter(Boolean);
-      if(data.length>2) return data;
-    }catch(e){continue;}
-  }
-  return[];
+      if(res){
+        const ts=res.timestamp||[],cl=res.indicators?.quote?.[0]?.close||[];
+        const data=ts.map((s,i)=>{const p=cl[i];return(p&&!isNaN(p)&&p>0)?{d:new Date(s*1000).toISOString().slice(0,10),p}:null;}).filter(Boolean);
+        if(data.length>2) return data;
+      }
+    }
+  }catch(e){}
+  // 2. Stooq fallback
+  const ssym=STOOQ_MAP[yfSym];
+  if(!ssym) return[];
+  const daysMap={'1mo':35,'3mo':95,'6mo':190,'1y':370,'3y':1100,'5y':1830};
+  return await stooqHist(ssym,daysMap[range]||35);
 }
 
 // Mini sparkline SVG
