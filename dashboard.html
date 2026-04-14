@@ -183,10 +183,18 @@ const pct=n=>n==null?'—':(n>0?'+':'')+Number(n).toFixed(2)+'%';
 const cc=n=>n==null?'neu':n>0?'up':n<0?'dn':'neu';
 const ar=n=>n==null?'':n>0?'▲':n<0?'▼':'–';
 
-const PERIODS={'1M':30,'3M':90,'6M':180,'1Y':365,'3Y':1095,'5Y':1825};
+// Yahoo Finance period config
+const PERIODS={
+  '1M':{range:'1mo',interval:'1d'},
+  '3M':{range:'3mo',interval:'1d'},
+  '6M':{range:'6mo',interval:'1d'},
+  '1Y':{range:'1y', interval:'1d'},
+  '3Y':{range:'3y', interval:'1wk'},
+  '5Y':{range:'5y', interval:'1wk'},
+};
 let _mSym='', _mName='';
 
-function card(sym,name,val,chg,unit='',sparkId='',clickSym=''){
+function card(sym,name,val,chg,unit='',spark='',clickSym=''){
   const c=cc(chg);
   const da=clickSym?` data-sym="${clickSym}" data-name="${name}"`:''
   return `<div class="card"${da}>
@@ -194,15 +202,10 @@ function card(sym,name,val,chg,unit='',sparkId='',clickSym=''){
     <div class="cname">${name}</div>
     <div class="cval">${val}${unit?`<span class="cunit">${unit}</span>`:''}</div>
     <div class="cch ${c}"><span class="ar">${ar(chg)}</span><span>${pct(chg)}</span></div>
-    ${sparkId?`<div id="${sparkId}" style="height:28px;margin-top:5px"></div>`:''}
+    ${spark}
   </div>`;
 }
 
-// Attach click delegation for chart modal
-['idx','com'].forEach(id=>{
-  document.addEventListener('DOMContentLoaded',()=>{});
-  // use event delegation after DOM ready
-});
 document.addEventListener('click',e=>{
   const c=e.target.closest('.card[data-sym]');
   if(c) openChart(c.dataset.sym, c.dataset.name);
@@ -211,93 +214,98 @@ document.addEventListener('click',e=>{
 // ── API helpers ──────────────────────────────────────────────
 
 async function getFX(){
-  const r=await fetch('https://open.er-api.com/v6/latest/USD');
-  return(await r.json()).rates;
+  try{
+    const r=await fetch('https://open.er-api.com/v6/latest/USD');
+    return(await r.json()).rates;
+  }catch(e){return null;}
 }
 
 async function getCrypto(){
-  const r=await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true');
-  return r.json();
+  try{
+    const r=await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple&vs_currencies=usd&include_24hr_change=true');
+    return r.json();
+  }catch(e){return null;}
 }
 
-// Fetch text via CORS proxies, returning first successful response
-async function proxyFetch(url){
-  const proxies=[
-    url,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  ];
-  for(const u of proxies){
-    try{
-      const ctrl=new AbortController();
-      const t=setTimeout(()=>ctrl.abort(),12000);
-      const r=await fetch(u,{signal:ctrl.signal});
-      clearTimeout(t);
-      if(!r.ok) continue;
-      const txt=await r.text();
-      if(txt.trim().startsWith('<')&&!u.includes('allorigins')&&!u.includes('corsproxy')) continue; // HTML error page
-      if(txt.trim().length<10) continue;
-      return txt;
-    }catch(e){continue;}
-  }
-  return null;
+// Yahoo Finance v8 — returns {price, chg, history:[{d,p}]}
+// history = last 30 days (for sparkline), fetched in same call as price
+async function getYF(symbol){
+  try{
+    const ctrl=new AbortController();
+    const t=setTimeout(()=>ctrl.abort(),12000);
+    const r=await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo&includePrePost=false`,
+      {signal:ctrl.signal,headers:{'Accept':'application/json'}}
+    );
+    clearTimeout(t);
+    if(!r.ok) return null;
+    const json=await r.json();
+    const res=json.chart?.result?.[0];
+    if(!res) return null;
+    const meta=res.meta;
+    const price=meta.regularMarketPrice||meta.regularMarketPreviousClose;
+    const prev=meta.chartPreviousClose||meta.previousClose;
+    if(!price||price<=0) return null;
+    const chg=prev?((price-prev)/prev*100):null;
+    // Parse history for sparkline
+    const ts=res.timestamp||[];
+    const cl=res.indicators?.quote?.[0]?.close||[];
+    const history=ts.map((stamp,i)=>{
+      const p=cl[i];
+      return(p&&!isNaN(p)&&p>0)?{d:new Date(stamp*1000).toISOString().slice(0,10),p}:null;
+    }).filter(Boolean);
+    return{price,chg,history};
+  }catch(e){return null;}
 }
 
-// Stooq current price CSV: Symbol,Date,Time,Open,High,Low,Close,Volume
-async function getIdx(sym){
-  const txt=await proxyFetch(`https://stooq.com/q/l/?s=${encodeURIComponent(sym)}&f=sd2t2ohlcv&h&e=csv`);
-  if(!txt) return null;
-  const lines=txt.trim().split('\n');
-  if(lines.length<2) return null;
-  const cols=lines[1].split(',');
-  const close=parseFloat(cols[6]);
-  const open=parseFloat(cols[3]);
-  if(!close||close<=0||isNaN(close)) return null;
-  const chg=(open&&!isNaN(open))?((close-open)/open*100):null;
-  return{price:close,chg};
+// Yahoo Finance v8 — historical data for modal chart
+async function getChartData(symbol,range,interval){
+  try{
+    const ctrl=new AbortController();
+    const t=setTimeout(()=>ctrl.abort(),15000);
+    const r=await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`,
+      {signal:ctrl.signal,headers:{'Accept':'application/json'}}
+    );
+    clearTimeout(t);
+    if(!r.ok) return[];
+    const json=await r.json();
+    const res=json.chart?.result?.[0];
+    if(!res) return[];
+    const ts=res.timestamp||[];
+    const cl=res.indicators?.quote?.[0]?.close||[];
+    return ts.map((stamp,i)=>{
+      const p=cl[i];
+      return(p&&!isNaN(p)&&p>0)?{d:new Date(stamp*1000).toISOString().slice(0,10),p}:null;
+    }).filter(Boolean);
+  }catch(e){return[];}
 }
 
-// Stooq historical CSV: Date,Open,High,Low,Close,Volume
-async function getHistory(sym,days=30){
-  const to=new Date(),from=new Date(+to-days*86400000);
-  const fmt=d=>d.toISOString().slice(0,10).replace(/-/g,'');
-  const txt=await proxyFetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(sym)}&d1=${fmt(from)}&d2=${fmt(to)}&i=d`);
-  if(!txt) return[];
-  const lines=txt.trim().split('\n').slice(1);
-  const data=lines.map(l=>{const c=l.split(',');const p=parseFloat(c[4]);return(!isNaN(p)&&p>0)?{d:c[0],p}:null;}).filter(Boolean);
-  return data.length>2?data:[];
-}
-
-// Mini sparkline SVG (100% wide × 28px)
-function sparklineSVG(data,chg){
-  if(!data||data.length<2) return '';
-  const prices=data.map(x=>x.p);
+// Mini sparkline SVG
+function sparklineSVG(history,chg){
+  if(!history||history.length<2) return '';
+  const prices=history.map(x=>x.p);
   const min=Math.min(...prices),max=Math.max(...prices),range=max-min||1;
   const W=100,H=26;
   const pts=prices.map((p,i)=>`${((i/(prices.length-1))*W).toFixed(1)},${(H-((p-min)/range)*H*0.82-2).toFixed(1)}`).join(' ');
   const col=chg==null?'#b5a890':chg>=0?'#2d7a4f':'#b84040';
-  return`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:26px;display:block;opacity:.9"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  return`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:26px;display:block;margin-top:5px;opacity:.9"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 
-// Load sparklines in background after main render
-function loadSparklines(items){
-  items.forEach(({id,sym,chg,days=30})=>{
-    getHistory(sym,days).then(data=>{
-      const el=document.getElementById(id);
-      if(el&&data.length>1) el.innerHTML=sparklineSVG(data,chg);
-    });
-  });
-}
-
-// Parse RSS XML into news items
+// News — RSS via allorigins proxy + DOMParser (no rss2json rate limits)
 function parseRSS(xml,src){
   try{
     const doc=new DOMParser().parseFromString(xml,'text/xml');
     if(doc.querySelector('parsererror')) return[];
-    const items=[...doc.querySelectorAll('item')].slice(0,7);
-    return items.map(it=>{
+    return[...doc.querySelectorAll('item')].slice(0,7).map(it=>{
       const title=(it.querySelector('title')?.textContent||'').replace(/<!\[CDATA\[|\]\]>/g,'').trim();
-      const link=(it.querySelector('link')?.textContent||it.querySelector('link')?.getAttribute('href')||'').trim();
+      // <link> in RSS is tricky — sometimes text node, sometimes next sibling
+      let link=it.querySelector('link')?.textContent?.trim()||'';
+      if(!link||link==='\n'){
+        // try guid or enclosure
+        link=it.querySelector('guid')?.textContent?.trim()||
+             it.querySelector('enclosure')?.getAttribute('url')||'';
+      }
       const pd=it.querySelector('pubDate')?.textContent||'';
       const date=pd?new Date(pd).toLocaleString('pl-PL',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       return title?{title,link,src,date}:null;
@@ -305,24 +313,32 @@ function parseRSS(xml,src){
   }catch(e){return[];}
 }
 
-// News — fetch RSS directly via allorigins (no rate limit, no key needed)
 async function getNews(){
   const feeds=[
-    {url:'https://feeds.reuters.com/reuters/businessNews',src:'Reuters'},
+    {url:'https://feeds.bbci.co.uk/news/business/rss.xml',src:'BBC Business'},
     {url:'https://www.cnbc.com/id/10000664/device/rss/rss.html',src:'CNBC'},
     {url:'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',src:'NY Times'},
-    {url:'https://feeds.finance.yahoo.com/rss/2.0/headline',src:'Yahoo Finance'},
+    {url:'https://feeds.reuters.com/reuters/businessNews',src:'Reuters'},
   ];
   for(const {url,src} of feeds){
     try{
       const ctrl=new AbortController();
       const t=setTimeout(()=>ctrl.abort(),10000);
-      const r=await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,{signal:ctrl.signal});
-      clearTimeout(t);
-      if(!r.ok) continue;
-      const txt=await r.text();
-      const items=parseRSS(txt,src);
-      if(items.length) return items;
+      // try allorigins first, then corsproxy
+      for(const proxy of [
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+      ]){
+        try{
+          const r=await fetch(proxy,{signal:ctrl.signal});
+          clearTimeout(t);
+          if(!r.ok) continue;
+          const txt=await r.text();
+          if(!txt.includes('<item')) continue;
+          const items=parseRSS(txt,src);
+          if(items.length) return items;
+        }catch(e){continue;}
+      }
     }catch(e){continue;}
   }
   return[];
@@ -349,14 +365,15 @@ async function loadModalChart(period){
   const el=document.getElementById('modal-chart');
   el.style.display='flex'; el.innerHTML='<span style="color:var(--muted)">Ładowanie...</span>';
   document.getElementById('modal-info').textContent='';
-  const data=await getHistory(_mSym,PERIODS[period]||30);
+  const {range,interval}=PERIODS[period]||PERIODS['1M'];
+  const data=await getChartData(_mSym,range,interval);
   el.style.display='block';
   el.innerHTML=renderModalChart(data);
   if(data.length>=2){
     const chgPct=((data[data.length-1].p-data[0].p)/data[0].p*100);
     document.getElementById('modal-info').textContent=
       `${data.length} sesji · ${data[0].d} → ${data[data.length-1].d} · zmiana: ${chgPct>=0?'+':''}${chgPct.toFixed(2)}%`;
-  } else {
+  }else{
     document.getElementById('modal-info').textContent='Brak danych dla wybranego okresu';
   }
 }
@@ -425,10 +442,11 @@ async function fetchAll(){
   const btn=document.getElementById('rbtn');
   btn.classList.add('loading');btn.textContent='↻ Ładowanie...';
 
+  // Yahoo Finance symbols: indices & commodities
   const [fxR,crR,spR,nqR,dxR,wgR,goldR,silvR,copR,oilR,newsR]=await Promise.allSettled([
     getFX(),getCrypto(),
-    getIdx('^spx'),getIdx('^ndq'),getIdx('^dax'),getIdx('wig20.pl'),
-    getIdx('xauusd'),getIdx('xagusd'),getIdx('hg.f'),getIdx('cl.f'),
+    getYF('^GSPC'),getYF('^IXIC'),getYF('^GDAXI'),getYF('^WIG20'),
+    getYF('GC=F'),getYF('SI=F'),getYF('HG=F'),getYF('CL=F'),
     getNews()
   ]);
 
@@ -437,18 +455,19 @@ async function fetchAll(){
   const gold=goldR.value,silv=silvR.value,cop=copR.value,oil=oilR.value;
   const news=newsR.value||[];
 
+  // Sparklines rendered inline (history already fetched in getYF call)
   document.getElementById('idx').innerHTML=[
-    card('SPX','S&P 500',sp?f2(sp.price,0):'—',sp?.chg,'','sk-spx','^spx'),
-    card('NDX','NASDAQ',nq?f2(nq.price,0):'—',nq?.chg,'','sk-ndq','^ndq'),
-    card('DAX','DAX Frankfurt',dx?f2(dx.price,0):'—',dx?.chg,'','sk-dax','^dax'),
-    card('WIG','WIG20 Warszawa',wg?f2(wg.price,0):'—',wg?.chg,'','sk-wg','wig20.pl'),
+    card('SPX','S&P 500',sp?f2(sp.price,0):'—',sp?.chg,'',sparklineSVG(sp?.history,sp?.chg),'^GSPC'),
+    card('NDX','NASDAQ',nq?f2(nq.price,0):'—',nq?.chg,'',sparklineSVG(nq?.history,nq?.chg),'^IXIC'),
+    card('DAX','DAX Frankfurt',dx?f2(dx.price,0):'—',dx?.chg,'',sparklineSVG(dx?.history,dx?.chg),'^GDAXI'),
+    card('WIG','WIG20 Warszawa',wg?f2(wg.price,0):'—',wg?.chg,'',sparklineSVG(wg?.history,wg?.chg),'^WIG20'),
   ].join('');
 
   document.getElementById('com').innerHTML=[
-    card('XAU','Złoto',gold?f2(gold.price):'—',gold?.chg,'USD/oz','sk-gold','xauusd'),
-    card('XAG','Srebro',silv?f2(silv.price):'—',silv?.chg,'USD/oz','sk-silv','xagusd'),
-    card('HG','Miedź',cop?f2(cop.price,3):'—',cop?.chg,'USD/lb','sk-cop','hg.f'),
-    card('CL','Ropa Brent',oil?f2(oil.price):'—',oil?.chg,'USD','sk-oil','cl.f'),
+    card('XAU','Złoto',gold?f2(gold.price):'—',gold?.chg,'USD/oz',sparklineSVG(gold?.history,gold?.chg),'GC=F'),
+    card('XAG','Srebro',silv?f2(silv.price):'—',silv?.chg,'USD/oz',sparklineSVG(silv?.history,silv?.chg),'SI=F'),
+    card('HG','Miedź',cop?f2(cop.price,3):'—',cop?.chg,'USD/lb',sparklineSVG(cop?.history,cop?.chg),'HG=F'),
+    card('CL','Ropa Brent',oil?f2(oil.price):'—',oil?.chg,'USD',sparklineSVG(oil?.history,oil?.chg),'CL=F'),
   ].join('');
 
   const eurusd=fx?(1/fx.EUR).toFixed(4):null;
@@ -514,18 +533,6 @@ async function fetchAll(){
 
   document.getElementById('ts').textContent='Aktualizacja: '+new Date().toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'});
   btn.classList.remove('loading');btn.textContent='↻ Odśwież';
-
-  // Load sparklines in background
-  loadSparklines([
-    {id:'sk-spx',sym:'^spx',chg:sp?.chg},
-    {id:'sk-ndq',sym:'^ndq',chg:nq?.chg},
-    {id:'sk-dax',sym:'^dax',chg:dx?.chg},
-    {id:'sk-wg', sym:'wig20.pl',chg:wg?.chg},
-    {id:'sk-gold',sym:'xauusd',chg:gold?.chg},
-    {id:'sk-silv',sym:'xagusd',chg:silv?.chg},
-    {id:'sk-cop', sym:'hg.f',  chg:cop?.chg},
-    {id:'sk-oil', sym:'cl.f',  chg:oil?.chg},
-  ]);
 }
 
 fetchAll();
