@@ -227,58 +227,70 @@ async function getCrypto(){
   }catch(e){return null;}
 }
 
-// Yahoo Finance v8 — returns {price, chg, history:[{d,p}]}
-// history = last 30 days (for sparkline), fetched in same call as price
+// Parse Yahoo Finance v8 JSON response
+function parseYF(json){
+  const res=json.chart?.result?.[0];
+  if(!res) return null;
+  const meta=res.meta;
+  const price=meta.regularMarketPrice||meta.regularMarketPreviousClose;
+  const prev=meta.chartPreviousClose||meta.previousClose;
+  if(!price||price<=0) return null;
+  const chg=prev?((price-prev)/prev*100):null;
+  const ts=res.timestamp||[];
+  const cl=res.indicators?.quote?.[0]?.close||[];
+  const history=ts.map((s,i)=>{const p=cl[i];return(p&&!isNaN(p)&&p>0)?{d:new Date(s*1000).toISOString().slice(0,10),p}:null;}).filter(Boolean);
+  return{price,chg,history};
+}
+
+// Fetch with timeout helper
+async function tf(url,ms=8000){
+  const c=new AbortController();
+  const t=setTimeout(()=>c.abort(),ms);
+  try{const r=await fetch(url,{signal:c.signal});clearTimeout(t);return r;}
+  catch(e){clearTimeout(t);throw e;}
+}
+
+// Yahoo Finance v8 — price + 30-day sparkline history
+// allorigins proxy is PRIMARY (avoids Yahoo CORS issues)
 async function getYF(symbol){
-  try{
-    const ctrl=new AbortController();
-    const t=setTimeout(()=>ctrl.abort(),12000);
-    const r=await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo&includePrePost=false`,
-      {signal:ctrl.signal,headers:{'Accept':'application/json'}}
-    );
-    clearTimeout(t);
-    if(!r.ok) return null;
-    const json=await r.json();
-    const res=json.chart?.result?.[0];
-    if(!res) return null;
-    const meta=res.meta;
-    const price=meta.regularMarketPrice||meta.regularMarketPreviousClose;
-    const prev=meta.chartPreviousClose||meta.previousClose;
-    if(!price||price<=0) return null;
-    const chg=prev?((price-prev)/prev*100):null;
-    // Parse history for sparkline
-    const ts=res.timestamp||[];
-    const cl=res.indicators?.quote?.[0]?.close||[];
-    const history=ts.map((stamp,i)=>{
-      const p=cl[i];
-      return(p&&!isNaN(p)&&p>0)?{d:new Date(stamp*1000).toISOString().slice(0,10),p}:null;
-    }).filter(Boolean);
-    return{price,chg,history};
-  }catch(e){return null;}
+  const yfUrl=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo&includePrePost=false`;
+  const urls=[
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(yfUrl)}`,
+    yfUrl,
+  ];
+  for(const url of urls){
+    try{
+      const r=await tf(url,8000);
+      if(!r.ok) continue;
+      const json=await r.json();
+      const result=parseYF(json);
+      if(result) return result;
+    }catch(e){continue;}
+  }
+  return null;
 }
 
 // Yahoo Finance v8 — historical data for modal chart
 async function getChartData(symbol,range,interval){
-  try{
-    const ctrl=new AbortController();
-    const t=setTimeout(()=>ctrl.abort(),15000);
-    const r=await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`,
-      {signal:ctrl.signal,headers:{'Accept':'application/json'}}
-    );
-    clearTimeout(t);
-    if(!r.ok) return[];
-    const json=await r.json();
-    const res=json.chart?.result?.[0];
-    if(!res) return[];
-    const ts=res.timestamp||[];
-    const cl=res.indicators?.quote?.[0]?.close||[];
-    return ts.map((stamp,i)=>{
-      const p=cl[i];
-      return(p&&!isNaN(p)&&p>0)?{d:new Date(stamp*1000).toISOString().slice(0,10),p}:null;
-    }).filter(Boolean);
-  }catch(e){return[];}
+  const yfUrl=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
+  const urls=[
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(yfUrl)}`,
+    yfUrl,
+  ];
+  for(const url of urls){
+    try{
+      const r=await tf(url,10000);
+      if(!r.ok) continue;
+      const json=await r.json();
+      const res=json.chart?.result?.[0];
+      if(!res) continue;
+      const ts=res.timestamp||[];
+      const cl=res.indicators?.quote?.[0]?.close||[];
+      const data=ts.map((s,i)=>{const p=cl[i];return(p&&!isNaN(p)&&p>0)?{d:new Date(s*1000).toISOString().slice(0,10),p}:null;}).filter(Boolean);
+      if(data.length>2) return data;
+    }catch(e){continue;}
+  }
+  return[];
 }
 
 // Mini sparkline SVG
@@ -313,33 +325,26 @@ function parseRSS(xml,src){
   }catch(e){return[];}
 }
 
+async function fetchFeed(url,src){
+  try{
+    const r=await tf(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,8000);
+    if(!r.ok) return[];
+    const txt=await r.text();
+    if(!txt.includes('<item')) return[];
+    return parseRSS(txt,src);
+  }catch(e){return[];}
+}
+
 async function getNews(){
+  // All feeds in parallel — take first non-empty result (max 8s total)
   const feeds=[
     {url:'https://feeds.bbci.co.uk/news/business/rss.xml',src:'BBC Business'},
     {url:'https://www.cnbc.com/id/10000664/device/rss/rss.html',src:'CNBC'},
     {url:'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',src:'NY Times'},
-    {url:'https://feeds.reuters.com/reuters/businessNews',src:'Reuters'},
   ];
-  for(const {url,src} of feeds){
-    try{
-      const ctrl=new AbortController();
-      const t=setTimeout(()=>ctrl.abort(),10000);
-      // try allorigins first, then corsproxy
-      for(const proxy of [
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-      ]){
-        try{
-          const r=await fetch(proxy,{signal:ctrl.signal});
-          clearTimeout(t);
-          if(!r.ok) continue;
-          const txt=await r.text();
-          if(!txt.includes('<item')) continue;
-          const items=parseRSS(txt,src);
-          if(items.length) return items;
-        }catch(e){continue;}
-      }
-    }catch(e){continue;}
+  const results=await Promise.allSettled(feeds.map(f=>fetchFeed(f.url,f.src)));
+  for(const r of results){
+    if(r.status==='fulfilled'&&r.value?.length) return r.value;
   }
   return[];
 }
